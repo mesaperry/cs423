@@ -25,7 +25,7 @@ MODULE_DESCRIPTION("CS-423 MP1");
 static unsigned long time;
 
 struct time_data {
-   unsigned pid;
+   int pid;
    unsigned long creation_time;
    struct list_head node;
 };
@@ -57,6 +57,7 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
    list_for_each_entry(this_entry, &time_list.node, node) {
       /* convert PID from unsigned to string */
       sprintf(temp_buffer, "%d", this_entry->pid);
+      // printk(KERN_ALERT "%d\n", this_entry->pid);
 
       /* copy PID string into buffer */
       i = 0;
@@ -100,7 +101,6 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    char procfs_buffer[LONG_BUFF_SIZE];
    size_t procfs_buffer_size;
    int error;
-   int i;
    ssize_t res;
 
    /* create struct to track process's uptime */
@@ -127,15 +127,10 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    }
 
    /* fix string to terminate */
-   for (i = 0; i < LONG_BUFF_SIZE; i++) {
-      if (procfs_buffer[i] == '\n') {
-         procfs_buffer[i] = '\0';
-         break;
-      }
-   }
+   procfs_buffer[procfs_buffer_size] = '\0';
 
    /* set pid */
-   error = kstrtoul(procfs_buffer, 10, (unsigned long*) &this_entry->pid);
+   error = kstrtol(procfs_buffer, 10, (long*) &this_entry->pid);
    if (error) {
       return error;
    }
