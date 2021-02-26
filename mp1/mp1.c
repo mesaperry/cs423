@@ -35,7 +35,29 @@ static struct timer_list timer;
 static struct work_struct work;
 
 static void work_callback(unsigned long data) {
+   struct time_data *this_entry;
+   struct list_head *this_node, *temp;
+   int res;
+   unsigned long cpu_time;
+
    printk(KERN_ALERT "work\n");
+
+   list_for_each_safe(this_node, temp, &time_list.node) {
+
+      this_entry = list_entry(this_node, struct time_data, node);
+      res = get_cpu_use(this_entry->pid, &cpu_time);
+      printk(KERN_ALERT "%d %d\n", this_entry->pid, res);
+
+      if (res == 0) {
+         /* update */
+         this_entry->lifetime = cpu_time;
+      }
+      else {
+         /* delete */
+         list_del(this_node);
+         kfree(this_entry);
+      }
+   }
 }
 
 static void timer_callback(unsigned long data) {
