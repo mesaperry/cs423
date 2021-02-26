@@ -6,6 +6,7 @@
 #include <linux/proc_fs.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/jiffies.h>
 #include <asm/uaccess.h>
 
 #include "mp1_given.h"
@@ -14,7 +15,7 @@
 #define DIRECTORY "mp1"
 #define RW_PERMISSION 0666                      // allows read, write but not execute
 #define LONG_BUFF_SIZE 21                       // number of digits in ULLONG_MAX + 1
-#define TIME_GRANULARITY 100                    // in jiffies
+#define TIMER_PERIOD 5000                       // in msec
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -22,19 +23,22 @@ MODULE_DESCRIPTION("CS-423 MP1");
 
 #define DEBUG 1
 
-static unsigned long time;
-
 struct time_data {
    int pid;
-   unsigned long creation_time;
+   unsigned long lifetime;
    struct list_head node;
 };
 
-/* init process time data list */
 static struct time_data time_list;
+static struct timer_list timer;
 
-static void inc_time_callback(unsigned long data) {
-   time += TIME_GRANULARITY;
+static void timer_callback(unsigned long data) {
+   printk(KERN_ALERT "test\n");
+
+   /* repeat timer if list is not empty */
+   if (time_list.node.next != &time_list.node) {
+      mod_timer(&timer, jiffies + msecs_to_jiffies(TIMER_PERIOD));
+   }
 }
 
 static struct proc_dir_entry *proc_dir;
@@ -72,7 +76,7 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
       procfs_buffer[procfs_buffer_size++] = ' ';
 
       /* convert CPU time from unsigned long to string */
-      sprintf(temp_buffer, "%d", (int)(time - this_entry->creation_time));
+      sprintf(temp_buffer, "%d", (int)(this_entry->lifetime));
 
       /* copy CPU time into buffer */
       i = 0;
@@ -103,14 +107,19 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    int error;
    ssize_t res;
 
+   /* startup timer if inactive */
+   if (!timer_pending(&timer)) {
+      mod_timer(&timer, jiffies + msecs_to_jiffies(TIMER_PERIOD));
+   }
+
    /* create struct to track process's uptime */
    this_entry = (struct time_data*) kmalloc(sizeof(struct time_data), GFP_KERNEL);
 
    /* add to list */
    list_add(&(this_entry->node), &(time_list.node));
 
-   /* set creation time */
-   this_entry->creation_time = time;
+   /* set lifetime to 0 */
+   this_entry->lifetime = 0;
 
    /* copy buffer into kernel space */
    procfs_buffer_size = count;
@@ -163,11 +172,12 @@ static int __init mp1_init(void)
       return -ENOMEM;
    }
 
-   /* module existance time starts at 0 */
-   time = 0;
-
    /* init process time list */
    INIT_LIST_HEAD(&time_list.node);
+
+   /* init timer */
+   init_timer(&timer);
+   setup_timer(&timer, timer_callback, 0);
    
    printk(KERN_ALERT "MP1 MODULE LOADED\n");
    return 0;
@@ -182,6 +192,9 @@ static void __exit mp1_exit(void)
    #ifdef DEBUG
    printk(KERN_ALERT "MP1 MODULE UNLOADING\n");
    #endif
+
+   /* delete timer */
+   del_timer(&timer);
    
    /* remove proc files */
    remove_proc_entry(FILENAME, proc_dir);
