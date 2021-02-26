@@ -40,13 +40,14 @@ static void work_callback(unsigned long data) {
    int res;
    unsigned long cpu_time;
 
+   #ifdef DEBUG
    printk(KERN_ALERT "work function called\n");
+   #endif
 
    list_for_each_safe(this_node, temp, &time_list.node) {
 
       this_entry = list_entry(this_node, struct time_data, node);
       res = get_cpu_use(this_entry->pid, &cpu_time);
-      printk(KERN_ALERT "%d %d\n", this_entry->pid, res);
 
       if (res == 0) {
          /* update */
