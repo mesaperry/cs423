@@ -140,20 +140,12 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    size_t procfs_buffer_size;
    int error;
    ssize_t res;
+   int temp_pid;
 
    /* startup timer if inactive */
    if (!timer_pending(&timer)) {
       mod_timer(&timer, jiffies + msecs_to_jiffies(TIMER_PERIOD));
    }
-
-   /* create struct to track process's uptime */
-   this_entry = (struct time_data*) kmalloc(sizeof(struct time_data), GFP_KERNEL);
-
-   /* add to list */
-   list_add(&(this_entry->node), &(time_list.node));
-
-   /* set lifetime to 0 */
-   this_entry->lifetime = 0;
 
    /* copy buffer into kernel space */
    procfs_buffer_size = count;
@@ -173,12 +165,20 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    procfs_buffer[procfs_buffer_size] = '\0';
 
    /* set pid */
-   error = kstrtol(procfs_buffer, 10, (long*) &this_entry->pid);
+   error = kstrtol(procfs_buffer, 10, (long*) &temp_pid);
    if (error) {
       return error;
    }
 
-   printk(KERN_ALERT "mp1_write");
+   /* create struct to track process's uptime */
+   this_entry = (struct time_data*) kmalloc(sizeof(struct time_data), GFP_KERNEL);
+
+   /* add to list */
+   list_add(&(this_entry->node), &(time_list.node));
+
+   /* set attributes */
+   this_entry->lifetime = 0;
+   this_entry->pid = temp_pid;
 
    return res;
 }
