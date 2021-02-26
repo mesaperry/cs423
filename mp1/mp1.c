@@ -40,7 +40,7 @@ static void work_callback(unsigned long data) {
    int res;
    unsigned long cpu_time;
 
-   printk(KERN_ALERT "work\n");
+   printk(KERN_ALERT "work function called\n");
 
    list_for_each_safe(this_node, temp, &time_list.node) {
 
@@ -61,7 +61,6 @@ static void work_callback(unsigned long data) {
 }
 
 static void timer_callback(unsigned long data) {
-   printk(KERN_ALERT "test\n");
 
    /* call work */
    schedule_work(&work);
@@ -173,6 +172,8 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
       return error;
    }
 
+   printk(KERN_ALERT "mp1_write");
+
    return res;
 }
 
@@ -211,7 +212,6 @@ static int __init mp1_init(void)
    /* init work */
    INIT_WORK(&work, work_callback);
    
-   printk(KERN_ALERT "MP1 MODULE LOADED\n");
    return 0;
 }
 
