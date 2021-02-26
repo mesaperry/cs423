@@ -7,6 +7,7 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
+#include <linux/workqueue.h>
 #include <asm/uaccess.h>
 
 #include "mp1_given.h"
@@ -31,14 +32,20 @@ struct time_data {
 
 static struct time_data time_list;
 static struct timer_list timer;
+static struct work_struct work;
+
+static void work_callback(unsigned long data) {
+   printk(KERN_ALERT "work\n");
+}
 
 static void timer_callback(unsigned long data) {
    printk(KERN_ALERT "test\n");
 
-   /* repeat timer if list is not empty */
-   if (time_list.node.next != &time_list.node) {
-      mod_timer(&timer, jiffies + msecs_to_jiffies(TIMER_PERIOD));
-   }
+   /* call work */
+   schedule_work(&work);
+
+   /* repeat timer */
+   mod_timer(&timer, jiffies + msecs_to_jiffies(TIMER_PERIOD));
 }
 
 static struct proc_dir_entry *proc_dir;
@@ -178,6 +185,9 @@ static int __init mp1_init(void)
    /* init timer */
    init_timer(&timer);
    setup_timer(&timer, timer_callback, 0);
+
+   /* init work */
+   INIT_WORK(&work, work_callback);
    
    printk(KERN_ALERT "MP1 MODULE LOADED\n");
    return 0;
@@ -192,6 +202,9 @@ static void __exit mp1_exit(void)
    #ifdef DEBUG
    printk(KERN_ALERT "MP1 MODULE UNLOADING\n");
    #endif
+
+   /* flush global workqueue */
+   flush_scheduled_work();
 
    /* delete timer */
    del_timer(&timer);
