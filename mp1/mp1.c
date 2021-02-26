@@ -47,6 +47,7 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
    char temp_buffer[LONG_BUFF_SIZE];
    int i;
    char *procfs_buffer;
+   ssize_t res;
 
    /* allocate procfs_buffer to heap */
    procfs_buffer = (char *) kmalloc(count, GFP_KERNEL);
@@ -54,13 +55,13 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
    /* load process time data into buffer */
    procfs_buffer_size = 0;
    list_for_each_entry(this_entry, &time_list.node, node) {
-      /* convert PID from unsigned int to string */
+      /* convert PID from unsigned to string */
       sprintf(temp_buffer, "%d", this_entry->pid);
 
       /* copy PID string into buffer */
       i = 0;
       while (temp_buffer[i] != '\0') {
-         procfs_buffer[procfs_buffer_size + i] = temp_buffer[i];
+         procfs_buffer[procfs_buffer_size] = temp_buffer[i];
          procfs_buffer_size++;
          i++;
       }
@@ -69,13 +70,13 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
       procfs_buffer[procfs_buffer_size++] = ':';
       procfs_buffer[procfs_buffer_size++] = ' ';
 
-      /* convert CPU time from unsigned int to string */
+      /* convert CPU time from unsigned long to string */
       sprintf(temp_buffer, "%d", (int)(time - this_entry->creation_time));
 
       /* copy CPU time into buffer */
       i = 0;
       while (temp_buffer[i] != '\0') {
-         procfs_buffer[procfs_buffer_size + i] = temp_buffer[i];
+         procfs_buffer[procfs_buffer_size] = temp_buffer[i];
          procfs_buffer_size++;
          i++;
       }
@@ -85,12 +86,12 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
    }
 
    /* copy buffer to user space */
-   copy_to_user(buffer, procfs_buffer, procfs_buffer_size);
+   res = simple_read_from_buffer(buffer, count, data, procfs_buffer, procfs_buffer_size);
 
    /* free buffer from heap */
    kfree(procfs_buffer);
 
-   return procfs_buffer_size;
+   return res;
 }
 
 static ssize_t mp1_write ( struct file *file, const char __user *buffer,
@@ -98,6 +99,9 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    struct time_data *this_entry;
    char procfs_buffer[LONG_BUFF_SIZE];
    size_t procfs_buffer_size;
+   int error;
+   int i;
+   ssize_t res;
 
    /* create struct to track process's uptime */
    this_entry = (struct time_data*) kmalloc(sizeof(struct time_data), GFP_KERNEL);
@@ -113,16 +117,30 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    if (procfs_buffer_size > LONG_BUFF_SIZE) {
       procfs_buffer_size = LONG_BUFF_SIZE;
    }
-   if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
-      return -EFAULT;
+   res = simple_write_to_buffer( procfs_buffer,
+                                 LONG_BUFF_SIZE,
+                                 data,
+                                 buffer,
+                                 procfs_buffer_size );
+   if (res < 0) {
+      return res;
+   }
+
+   /* fix string to terminate */
+   for (i = 0; i < LONG_BUFF_SIZE; i++) {
+      if (procfs_buffer[i] == '\n') {
+         procfs_buffer[i] = '\0';
+         break;
+      }
    }
 
    /* set pid */
-   if (kstrtoul(procfs_buffer, 10, (unsigned long*) &this_entry->pid)) {
-      return -EINVAL;
+   error = kstrtoul(procfs_buffer, 10, (unsigned long*) &this_entry->pid);
+   if (error) {
+      return error;
    }
 
-   return procfs_buffer_size;
+   return res;
 }
 
 static const struct file_operations mp1_fops = {
