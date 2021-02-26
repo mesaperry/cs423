@@ -24,6 +24,7 @@ MODULE_DESCRIPTION("CS-423 MP1");
 
 #define DEBUG 1
 
+/* struct time_data - linked list data */
 struct time_data {
    int pid;
    unsigned long lifetime;
@@ -34,6 +35,10 @@ static struct time_data time_list;
 static struct timer_list timer;
 static struct work_struct work;
 
+static struct proc_dir_entry *proc_dir;
+static struct proc_dir_entry *proc_entry;
+
+/* work_callback - handler for workqueue, updates process lifetimes */
 static void work_callback(unsigned long data) {
    struct time_data *this_entry;
    struct list_head *this_node, *temp;
@@ -61,6 +66,7 @@ static void work_callback(unsigned long data) {
    }
 }
 
+/* timer_callback - handler for periodic timer */
 static void timer_callback(unsigned long data) {
 
    /* call work */
@@ -70,9 +76,7 @@ static void timer_callback(unsigned long data) {
    mod_timer(&timer, jiffies + msecs_to_jiffies(TIMER_PERIOD));
 }
 
-static struct proc_dir_entry *proc_dir;
-static struct proc_dir_entry *proc_entry;
-
+/* mp1_read - outputs tracked process lifetimes */
 static ssize_t mp1_read ( struct file *file, char __user *buffer,
                            size_t count, loff_t *data ) {
    struct time_data *this_entry;
@@ -128,6 +132,7 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
    return res;
 }
 
+/* mp1_write - registers input PID to have its lifetime tracked */
 static ssize_t mp1_write ( struct file *file, const char __user *buffer,
                            size_t count, loff_t *data ) {
    struct time_data *this_entry;
@@ -178,18 +183,29 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    return res;
 }
 
+/* mp1_fops - stores links read and write functions to mp1 file */
 static const struct file_operations mp1_fops = {
    .owner   = THIS_MODULE,
    .read    = mp1_read,
    .write   = mp1_write,
 };
 
-// mp1_init - Called when module is loaded
+/* mp1_init - called when module is loaded */
 static int __init mp1_init(void)
 {
    #ifdef DEBUG
    printk(KERN_ALERT "MP1 MODULE LOADING\n");
    #endif
+
+   /* init work */
+   INIT_WORK(&work, work_callback);
+
+   /* init process time list */
+   INIT_LIST_HEAD(&time_list.node);
+
+   /* init timer */
+   init_timer(&timer);
+   setup_timer(&timer, timer_callback, 0);
 
    /* make directory */
    proc_dir = proc_mkdir(DIRECTORY, NULL);
@@ -202,21 +218,11 @@ static int __init mp1_init(void)
    if (!proc_entry) {
       return -ENOMEM;
    }
-
-   /* init process time list */
-   INIT_LIST_HEAD(&time_list.node);
-
-   /* init timer */
-   init_timer(&timer);
-   setup_timer(&timer, timer_callback, 0);
-
-   /* init work */
-   INIT_WORK(&work, work_callback);
    
    return 0;
 }
 
-// mp1_exit - Called when module is unloaded
+/* mp1_exit - called when module is unloaded */
 static void __exit mp1_exit(void)
 {
    struct time_data *this_entry;
@@ -226,11 +232,11 @@ static void __exit mp1_exit(void)
    printk(KERN_ALERT "MP1 MODULE UNLOADING\n");
    #endif
 
-   /* flush global workqueue */
-   flush_scheduled_work();
-
    /* delete timer */
    del_timer(&timer);
+
+   /* flush global workqueue */
+   flush_scheduled_work();
    
    /* remove proc files */
    remove_proc_entry(FILENAME, proc_dir);
@@ -246,6 +252,6 @@ static void __exit mp1_exit(void)
    printk(KERN_ALERT "MP1 MODULE UNLOADED\n");
 }
 
-// Register init and exit funtions
+/* register init and exit funtions */
 module_init(mp1_init);
 module_exit(mp1_exit);
