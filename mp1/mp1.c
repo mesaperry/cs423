@@ -42,7 +42,7 @@ static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
 
 /* work_callback - handler for workqueue, updates process lifetimes */
-static void work_callback(unsigned long data) {
+static void work_callback(void *data) {
    struct time_data *this_entry;
    struct list_head *this_node, *temp;
    int res;
@@ -210,7 +210,7 @@ static int __init mp1_init(void)
    spin_lock_init(&list_lock);
 
    /* init work */
-   INIT_WORK(&work, work_callback);
+   INIT_WORK(&work, (work_func_t) work_callback);
 
    /* init process time list */
    INIT_LIST_HEAD(&time_list.node);
