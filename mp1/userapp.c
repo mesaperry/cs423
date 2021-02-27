@@ -5,7 +5,7 @@
 
 #define FILENAME "/proc/mp1/status"
 
-#define TIMER 15                       // approximate amount of time for app to last
+#define TIMER 20                       // approximate amount of time for app to last
 
 int main(int argc, char* argv[])
 {

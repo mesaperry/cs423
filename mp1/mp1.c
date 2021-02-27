@@ -48,10 +48,6 @@ static void work_callback(void *data) {
    int res;
    unsigned long cpu_time;
 
-   #ifdef DEBUG
-   printk(KERN_ALERT "work function called\n");
-   #endif
-
    /* update list */
    spin_lock(&list_lock);
    list_for_each_safe(this_node, temp, &time_list.node) {
