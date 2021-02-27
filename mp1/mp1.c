@@ -23,7 +23,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
 MODULE_DESCRIPTION("CS-423 MP1");
 
-#define DEBUG 1
+#define DEBUG 0
 
 /* struct time_data - linked list data */
 struct time_data {
@@ -226,6 +226,8 @@ static int __init mp1_init(void)
    if (!proc_entry) {
       return -ENOMEM;
    }
+   
+   printk(KERN_ALERT "MP1 MODULE LOADED\n");
    
    return 0;
 }
