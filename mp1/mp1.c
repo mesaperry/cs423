@@ -8,6 +8,7 @@
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
+#include <linux/spinlock_types.h>
 #include <asm/uaccess.h>
 
 #include "mp1_given.h"
@@ -31,6 +32,8 @@ struct time_data {
    struct list_head node;
 };
 
+static spinlock_t list_lock;
+
 static struct time_data time_list;
 static struct timer_list timer;
 static struct work_struct work;
@@ -49,21 +52,24 @@ static void work_callback(unsigned long data) {
    printk(KERN_ALERT "work function called\n");
    #endif
 
+   /* update list */
+   spin_lock(&list_lock);
    list_for_each_safe(this_node, temp, &time_list.node) {
 
       this_entry = list_entry(this_node, struct time_data, node);
       res = get_cpu_use(this_entry->pid, &cpu_time);
 
       if (res == 0) {
-         /* update */
+         /* process exists, update node data */
          this_entry->lifetime = cpu_time;
       }
       else {
-         /* delete */
+         /* process doesn't exist, delete node data */
          list_del(this_node);
          kfree(this_entry);
       }
    }
+   spin_unlock(&list_lock);
 }
 
 /* timer_callback - handler for periodic timer */
@@ -91,10 +97,10 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
 
    /* load process time data into buffer */
    procfs_buffer_size = 0;
+   spin_lock(&list_lock);
    list_for_each_entry(this_entry, &time_list.node, node) {
       /* convert PID from unsigned to string */
       sprintf(temp_buffer, "%d", this_entry->pid);
-      // printk(KERN_ALERT "%d\n", this_entry->pid);
 
       /* copy PID string into buffer */
       i = 0;
@@ -122,6 +128,7 @@ static ssize_t mp1_read ( struct file *file, char __user *buffer,
       /* add new line */
       procfs_buffer[procfs_buffer_size++] = '\n';
    }
+   spin_unlock(&list_lock);
 
    /* copy buffer to user space */
    res = simple_read_from_buffer(buffer, count, data, procfs_buffer, procfs_buffer_size);
@@ -174,7 +181,9 @@ static ssize_t mp1_write ( struct file *file, const char __user *buffer,
    this_entry = (struct time_data*) kmalloc(sizeof(struct time_data), GFP_KERNEL);
 
    /* add to list */
+   spin_lock(&list_lock);
    list_add(&(this_entry->node), &(time_list.node));
+   spin_unlock(&list_lock);
 
    /* set attributes */
    this_entry->lifetime = 0;
@@ -196,6 +205,9 @@ static int __init mp1_init(void)
    #ifdef DEBUG
    printk(KERN_ALERT "MP1 MODULE LOADING\n");
    #endif
+
+   /* init spinlock */
+   spin_lock_init(&list_lock);
 
    /* init work */
    INIT_WORK(&work, work_callback);
