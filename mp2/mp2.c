@@ -29,13 +29,13 @@ struct mp2_task_struct {
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
 
-/* mp2_read -  */
+/* mp2_read - outputs a list of processes and their scheduling parameters */
 static ssize_t mp2_read ( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
 	return 0;
 }
 
-/* mp2_write -  */
+/* mp2_write - interface for userapps to register, yield, or de-register */
 static ssize_t mp2_write ( struct file *file, const char __user *buffer,
 									size_t count, loff_t *data ) {
 	char procfs_buffer[LONG_BUFF_SIZE];
