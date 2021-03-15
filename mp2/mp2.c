@@ -19,11 +19,17 @@ MODULE_DESCRIPTION("CS-423 MP2");
 
 #define DEBUG 1
 
+enum task_state { READY, RUNNING, SLEEPING };
+
 struct mp2_task_struct {
 	struct task_struct *linux_task;
     struct timer_list wakeup_timer;
-    uint32_t period;
-    uint32_t proc_time;
+    struct list_head list;
+    pid_t pid;
+    unsigned long period;
+    unsigned long runtime_ms;
+    unsigned long deadline_jiff;
+    enum task_state state;
 };
 
 static struct proc_dir_entry *proc_dir;
