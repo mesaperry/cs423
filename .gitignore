@@ -1,0 +1,19 @@
+# compiled files
+*.cmd
+*.ko
+*.o
+userapp
+
+# module files
+*.mod.c
+Module.symvers
+modules.order
+
+# IDE files
+.ssh/
+.vscode/
+
+# misc
+.cache.mk
+.tmp_versions/
+ 
