@@ -8,13 +8,14 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/uaccess.h>
 
 #include "mp2_given.h"
 
 #define FILENAME "status"
 #define DIRECTORY "mp2"
 #define RW_PERMISSION 0666                      // allows read, write but not execute
-#define BUFF_SIZE 128
+#define BUFF_SIZE 256
 #define DECIMAL_BASE 10
 
 MODULE_LICENSE("GPL");
@@ -56,7 +57,6 @@ static int get_proc_params(char *buff, size_t count) {
 	/* iterate through each process */
 	list_for_each_entry(pcb, &proc_list.list, list) {
 		printk(KERN_ALERT "HEY");
-		break;
 
 		/* convert PID to string and insert into buffer */
 		res = snprintf(buff + pos, count - pos, "%d", pcb->pid);
@@ -101,37 +101,35 @@ static int get_proc_params(char *buff, size_t count) {
 
 		/* insert newline */
 		buff[pos++] = '\n';
-
 	}
 
 	/* exit critical section */
 	mutex_unlock(&list_mutex);
 
-	return res;
+	/* null terminate string */
+	buff[pos++] = '\0';
+
+	printk(KERN_ALERT "%s\n", buff);
+	printk(KERN_ALERT "%Ld\n", pos);
+
+	return pos;
 }
 
 /* mp2_read - outputs a list of processes and their scheduling parameters */
 static ssize_t mp2_read( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
-   	char *procfs_buffer;
-   	ssize_t res;
-
-	/* allocate procfs_buffer to heap */
-	procfs_buffer = (char *) kmalloc(count, GFP_KERNEL);
+   	char procfs_buffer[BUFF_SIZE];
+   	int res;
 	
 	/* generate output */
 	res = get_proc_params(procfs_buffer, count);
-	if (res) {
+	if (res < 0) {
+		/* error handling */
 		return res;
 	}
 
 	/* copy buffer to user space */
-	res = simple_read_from_buffer(buffer, res, data, procfs_buffer, count);
-
-	/* free buffer from heap */
-	kfree(procfs_buffer);
-
-	return res;
+	return simple_read_from_buffer(buffer, count, data, procfs_buffer, BUFF_SIZE);
 }
 
 /* get_next_arg - places next arg into buffer and returns size */
@@ -157,9 +155,10 @@ static size_t get_next_arg(char *buff, char *arg_buff, loff_t *pos) {
 }
 
 /* init_pcb - creates an augmented PCB */
-static void init_pcb( struct mp2_task_struct *aug_pcb, pid_t pid,
-					  unsigned long period, unsigned long processing_time ) {
+static struct mp2_task_struct* init_pcb( pid_t pid, unsigned long period,
+										 unsigned long processing_time ) {
 	struct task_struct *pcb;
+	struct mp2_task_struct *aug_pcb;
 
 	/* get the userapp's task_struct */
 	pcb = find_task_by_pid(pid);
@@ -169,10 +168,13 @@ static void init_pcb( struct mp2_task_struct *aug_pcb, pid_t pid,
 												 GFP_KERNEL );
 
 	/* init task members */
+	aug_pcb->linux_task = pcb;
 	aug_pcb->pid = pid;
 	aug_pcb->period = period;
 	aug_pcb->runtime_ms = processing_time;
 	aug_pcb->state = SLEEPING;
+
+	return aug_pcb;
 }
 
 /* mp2_write - interface for userapps to register, yield, or de-register */
@@ -188,9 +190,6 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
     unsigned long processing_time;
 	int error;
 	struct mp2_task_struct *pcb;
-
-	/* init pcb to NULL to suppress compiler warnings */
-	pcb = NULL;
 
 	/* copy buffer into kernel space */
 	procfs_size = simple_write_to_buffer( procfs_buff,
@@ -237,12 +236,12 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 			#endif
 
 			/* initialize augmented PCB */
-			// init_pcb(pcb, pid, period, processing_time);
+			pcb = init_pcb(pid, period, processing_time);
 
 			/* add PCB to list */
-			// mutex_lock(&list_mutex);
-   			// list_add(&(pcb->list), &(proc_list.list));
-			// mutex_unlock(&list_mutex);
+			mutex_lock(&list_mutex);
+   			list_add(&(pcb->list), &(proc_list.list));
+			mutex_unlock(&list_mutex);
 
 			break;
 
