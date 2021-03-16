@@ -42,6 +42,73 @@ static struct mp2_task_struct proc_list;
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
 
+/* get_proc_params - loads processes parameters into buffer */
+static int get_proc_params(char *buff, size_t count) {
+	struct mp2_task_struct *pcb;
+	loff_t pos;
+	int res;
+
+	/* initialize position to beginning of buffer */
+	pos = 0;
+
+	/* enter critical section */
+	pthread_mutex_lock(&list_mutex);
+
+	/* iterate through each process */
+	list_for_each_entry(pcb, &proc_list.list, list) {
+
+		/* convert PID to string and insert into buffer */
+		res = snprintf(buff + pos, count - pos, "%d", pcb->pid);
+		if (res < 0) {
+			/* return with error */
+			return res;
+		}
+		else {
+			/* increment position by number of written characters */
+			pos += res;
+		}
+		
+		/* insert formatting */
+		buff[pos++] = ':';
+		buff[pos++] = ' ';
+
+		/* convert period to string and insert into buffer */
+		res = snprintf(buff + pos, count - pos, "%lu", pcb->period);
+		if (res < 0) {
+			/* return with error */
+			return res;
+		}
+		else {
+			/* increment position by number of written characters */
+			pos += res;
+		}
+		
+		/* insert formatting */
+		buff[pos++] = ',';
+		buff[pos++] = ' ';
+
+		/* convert processing time to string and insert into buffer */
+		res = snprintf(buff + pos, count - pos, "%lu", pcb->runtime_ms);
+		if (res < 0) {
+			/* return with error */
+			return res;
+		}
+		else {
+			/* increment position by number of written characters */
+			pos += res;
+		}
+
+		/* insert newline */
+		buff[pos++] = '\n';
+
+	}
+
+	/* exit critical section */
+	pthread_mutex_unlock(&list_mutex);
+
+	return 0;
+}
+
 /* mp2_read - outputs a list of processes and their scheduling parameters */
 static ssize_t mp2_read( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
@@ -51,7 +118,11 @@ static ssize_t mp2_read( struct file *file, char __user *buffer,
 	/* allocate procfs_buffer to heap */
 	procfs_buffer = (char *) kmalloc(count, GFP_KERNEL);
 	
-
+	/* generate output */
+	res = get_proc_params(procfs_buffer, count);
+	if (res) {
+		return res;
+	}
 
 	/* copy buffer to user space */
 	res = simple_read_from_buffer(buffer, count, data, procfs_buffer, count);
@@ -97,9 +168,10 @@ static void init_pcb( struct mp2_task_struct *aug_pcb, pid_t pid,
 												 GFP_KERNEL );
 
 	/* init task members */
-	aug_pcb->state = SLEEPING;
+	aug_pcb->pid = pid;
 	aug_pcb->period = period;
 	aug_pcb->runtime_ms = processing_time;
+	aug_pcb->state = SLEEPING;
 }
 
 /* mp2_write - interface for userapps to register, yield, or de-register */
