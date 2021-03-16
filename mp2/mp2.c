@@ -6,6 +6,8 @@
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/list.h>
+#include <pthread.h>
 
 #include "mp2_given.h"
 
@@ -21,7 +23,7 @@ MODULE_DESCRIPTION("CS-423 MP2");
 
 #define DEBUG 1
 
-enum task_state { READY, RUNNING, SLEEPING };
+static enum task_state { READY, RUNNING, SLEEPING };
 
 struct mp2_task_struct {
 	struct task_struct *linux_task;
@@ -34,8 +36,11 @@ struct mp2_task_struct {
     enum task_state state;
 };
 
-static struct proc_dir_entry *proc_dir;
-static struct proc_dir_entry *proc_entry;
+static pthread_mutex_t list_mutex;
+static struct mp2_task_struct proc_list;
+
+static struct proc_dir_entry *procfs_dir;
+static struct proc_dir_entry *procfs_entry;
 
 /* mp2_read - outputs a list of processes and their scheduling parameters */
 static ssize_t mp2_read( struct file *file, char __user *buffer,
@@ -109,6 +114,7 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
     unsigned long period;
     unsigned long processing_time;
 	int error;
+	struct mp2_task_struct *pcb;
 
 	/* copy buffer into kernel space */
 	procfs_size = simple_write_to_buffer( procfs_buff,
@@ -155,7 +161,18 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 			}
 
 			/* initialize augmented PCB */
-			
+			init_pcb(pcb, pid, period, processing_time);
+
+			/* add PCB to list */
+			error = pthread_mutex_lock(&list_mutex);
+			if (error) {
+				return error;
+			}
+   			list_add(&(pcb->list), &(proc_list.list));
+			error = pthread_mutex_unlock(&list_mutex);
+			if (error) {
+				return error;
+			}
 
 			break;
 
@@ -190,15 +207,21 @@ static int __init mp2_init(void) {
 	printk(KERN_ALERT "MP2 MODULE LOADING\n");
 	#endif
 
+	/* init process list */
+	INIT_LIST_HEAD(&proc_list.list);
+
+	/* init list mutex */
+	pthread_mutex_init(&list_mutex, NULL);
+
 	/* make directory */
-	proc_dir = proc_mkdir(DIRECTORY, NULL);
-	if (!proc_dir) {
+	procfs_dir = proc_mkdir(DIRECTORY, NULL);
+	if (!procfs_dir) {
 		return -ENOMEM;
 	}
 
 	/* make entry */
-	proc_entry = proc_create(FILENAME, RW_PERMISSION, proc_dir, &mp2_fops);
-	if (!proc_entry) {
+	procfs_entry = proc_create(FILENAME, RW_PERMISSION, procfs_dir, &mp2_fops);
+	if (!procfs_entry) {
 		return -ENOMEM;
 	}
 	
@@ -211,13 +234,26 @@ static int __init mp2_init(void) {
 
 /* mp2_exit - called when module is unloaded */
 static void __exit mp2_exit(void) {
+	struct mp2_task_struct *this_task;
+	struct list_head *this_node, *temp;
+
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
 	#endif
 
 	/* remove proc files */
-	remove_proc_entry(FILENAME, proc_dir);
+	remove_proc_entry(FILENAME, procfs_dir);
 	remove_proc_entry(DIRECTORY, NULL);
+
+	/* clear list mutex */
+	pthread_mutex_destroy(&list_mutex);
+
+	/* clear process list */
+	list_for_each_safe(this_node, temp, &time_list.node) {
+		this_task = list_entry(this_node, struct mp2_task_struct, list);
+		list_del(this_node);
+		kfree(this_task);
+	}
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
