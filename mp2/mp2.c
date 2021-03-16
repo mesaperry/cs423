@@ -5,6 +5,7 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 
 #include "mp2_given.h"
 
@@ -39,7 +40,21 @@ static struct proc_dir_entry *proc_entry;
 /* mp2_read - outputs a list of processes and their scheduling parameters */
 static ssize_t mp2_read( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
-	return 0;
+   	char *procfs_buffer;
+   	ssize_t res;
+
+	/* allocate procfs_buffer to heap */
+	procfs_buffer = (char *) kmalloc(count, GFP_KERNEL);
+	
+
+
+	/* copy buffer to user space */
+	res = simple_read_from_buffer(buffer, count, data, procfs_buffer, count);
+
+	/* free buffer from heap */
+	kfree(procfs_buffer);
+
+	return res;
 }
 
 /* get_next_arg - places next arg into buffer and returns size */
@@ -62,6 +77,24 @@ static size_t get_next_arg(char *buff, char *arg_buff, loff_t *pos) {
 	arg_buff[arg_size++] = '\0';
 
 	return arg_size;
+}
+
+/* init_pcb - creates an augmented PCB */
+static void init_pcb( struct mp2_task_struct *aug_pcb, pid_t pid,
+					  unsigned long period, unsigned long processing_time ) {
+	struct task_struct *pcb;
+
+	/* get the userapp's task_struct */
+	pcb = find_task_by_pid(pid);
+
+	/* allocate cache for PCB */
+	aug_pcb = (struct mp2_task_struct*) kmalloc( sizeof(struct mp2_task_struct),
+												 GFP_KERNEL );
+
+	/* init task members */
+	aug_pcb->state = SLEEPING;
+	aug_pcb->period = period;
+	aug_pcb->runtime_ms = processing_time;
 }
 
 /* mp2_write - interface for userapps to register, yield, or de-register */
@@ -95,48 +128,49 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 
 	/* get PID arg */
 	get_next_arg(procfs_buff, arg_buff, &pos);
-	error = kstrtol(arg_buff, DECIMAL_BASE, (long *) &pid);
+	error = kstrtoint(arg_buff, DECIMAL_BASE, &pid);
 	if (error) {
 		return error;
 	}
 
 	switch (operation) {
 		case 'R':
-			printk(KERN_ALERT "write case R");
+			#ifdef DEBUG
+			printk( KERN_ALERT "Registering PID: %d, Period: %lu, ProcTime %lu\n",
+					pid, period, processing_time );
+			#endif
 
 			/* get period arg */
 			get_next_arg(procfs_buff, arg_buff, &pos);
-			error = kstrtol(arg_buff, DECIMAL_BASE, &period);
+			error = kstrtoul(arg_buff, DECIMAL_BASE, &period);
 			if (error) {
 				return error;
 			}
 
 			/* get processing time arg */
 			get_next_arg(procfs_buff, arg_buff, &pos);
-			error = kstrtol(arg_buff, DECIMAL_BASE, &processing_time);
+			error = kstrtoul(arg_buff, DECIMAL_BASE, &processing_time);
 			if (error) {
 				return error;
 			}
 
-            // struct mp2_task_struct *pcb;
-
-            // /* get the userapp's task_struct */
-            // find_task_by_pid();
-
-            // /* allocate cache for PCB */
-            // pcb = (struct mp2_task_struct*) kmalloc(sizeof(struct mp2_task_struct), GFP_KERNEL);
-
-            // /* init task to SLEEPING state */
-            // pcb->state = SLEEPING;
+			/* initialize augmented PCB */
+			
 
 			break;
 
 		case 'Y':
-			printk(KERN_ALERT "write case Y");
+			#ifdef DEBUG
+			printk(KERN_ALERT "Yielding PID: %d\n", pid);
+			#endif
+
 			break;
 
 		case 'D':
-			printk(KERN_ALERT "write case D");
+			#ifdef DEBUG
+			printk(KERN_ALERT "De-registering PID: %d\n", pid);
+			#endif
+
 			break;
 	}
 
