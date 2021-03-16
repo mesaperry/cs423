@@ -48,12 +48,15 @@ static int get_proc_params(char *buff, size_t count) {
 
 	/* initialize position to beginning of buffer */
 	pos = 0;
+	res = 0;
 
 	/* enter critical section */
 	mutex_lock(&list_mutex);
 
 	/* iterate through each process */
 	list_for_each_entry(pcb, &proc_list.list, list) {
+		printk(KERN_ALERT "HEY");
+		break;
 
 		/* convert PID to string and insert into buffer */
 		res = snprintf(buff + pos, count - pos, "%d", pcb->pid);
@@ -104,7 +107,7 @@ static int get_proc_params(char *buff, size_t count) {
 	/* exit critical section */
 	mutex_unlock(&list_mutex);
 
-	return 0;
+	return res;
 }
 
 /* mp2_read - outputs a list of processes and their scheduling parameters */
@@ -123,7 +126,7 @@ static ssize_t mp2_read( struct file *file, char __user *buffer,
 	}
 
 	/* copy buffer to user space */
-	res = simple_read_from_buffer(buffer, count, data, procfs_buffer, count);
+	res = simple_read_from_buffer(buffer, res, data, procfs_buffer, count);
 
 	/* free buffer from heap */
 	kfree(procfs_buffer);
@@ -214,11 +217,6 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 
 	switch (operation) {
 		case 'R':
-			#ifdef DEBUG
-			printk( KERN_ALERT "Registering PID: %d, Period: %lu, ProcTime %lu\n",
-					pid, period, processing_time );
-			#endif
-
 			/* get period arg */
 			get_next_arg(procfs_buff, arg_buff, &pos);
 			error = kstrtoul(arg_buff, DECIMAL_BASE, &period);
@@ -233,13 +231,18 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 				return error;
 			}
 
+			#ifdef DEBUG
+			printk( KERN_ALERT "Registering PID: %d, Period: %lu, ProcTime %lu\n",
+					pid, period, processing_time );
+			#endif
+
 			/* initialize augmented PCB */
-			init_pcb(pcb, pid, period, processing_time);
+			// init_pcb(pcb, pid, period, processing_time);
 
 			/* add PCB to list */
-			mutex_lock(&list_mutex);
-   			list_add(&(pcb->list), &(proc_list.list));
-			mutex_unlock(&list_mutex);
+			// mutex_lock(&list_mutex);
+   			// list_add(&(pcb->list), &(proc_list.list));
+			// mutex_unlock(&list_mutex);
 
 			break;
 
