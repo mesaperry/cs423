@@ -7,7 +7,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/list.h>
-#include <pthread.h>
+#include <linux/mutex.h>
 
 #include "mp2_given.h"
 
@@ -23,8 +23,6 @@ MODULE_DESCRIPTION("CS-423 MP2");
 
 #define DEBUG 1
 
-static enum task_state { READY, RUNNING, SLEEPING };
-
 struct mp2_task_struct {
 	struct task_struct *linux_task;
     struct timer_list wakeup_timer;
@@ -33,10 +31,10 @@ struct mp2_task_struct {
     unsigned long period;
     unsigned long runtime_ms;
     unsigned long deadline_jiff;
-    enum task_state state;
+    enum task_state { READY, RUNNING, SLEEPING } state;
 };
 
-static pthread_mutex_t list_mutex;
+static struct mutex list_mutex;
 static struct mp2_task_struct proc_list;
 
 static struct proc_dir_entry *procfs_dir;
@@ -52,7 +50,7 @@ static int get_proc_params(char *buff, size_t count) {
 	pos = 0;
 
 	/* enter critical section */
-	pthread_mutex_lock(&list_mutex);
+	mutex_lock(&list_mutex);
 
 	/* iterate through each process */
 	list_for_each_entry(pcb, &proc_list.list, list) {
@@ -104,7 +102,7 @@ static int get_proc_params(char *buff, size_t count) {
 	}
 
 	/* exit critical section */
-	pthread_mutex_unlock(&list_mutex);
+	mutex_unlock(&list_mutex);
 
 	return 0;
 }
@@ -188,6 +186,9 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 	int error;
 	struct mp2_task_struct *pcb;
 
+	/* init pcb to NULL to suppress compiler warnings */
+	pcb = NULL;
+
 	/* copy buffer into kernel space */
 	procfs_size = simple_write_to_buffer( procfs_buff,
                                   BUFF_SIZE,
@@ -236,15 +237,9 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 			init_pcb(pcb, pid, period, processing_time);
 
 			/* add PCB to list */
-			error = pthread_mutex_lock(&list_mutex);
-			if (error) {
-				return error;
-			}
+			mutex_lock(&list_mutex);
    			list_add(&(pcb->list), &(proc_list.list));
-			error = pthread_mutex_unlock(&list_mutex);
-			if (error) {
-				return error;
-			}
+			mutex_unlock(&list_mutex);
 
 			break;
 
@@ -283,7 +278,7 @@ static int __init mp2_init(void) {
 	INIT_LIST_HEAD(&proc_list.list);
 
 	/* init list mutex */
-	pthread_mutex_init(&list_mutex, NULL);
+	mutex_init(&list_mutex);
 
 	/* make directory */
 	procfs_dir = proc_mkdir(DIRECTORY, NULL);
@@ -317,11 +312,8 @@ static void __exit mp2_exit(void) {
 	remove_proc_entry(FILENAME, procfs_dir);
 	remove_proc_entry(DIRECTORY, NULL);
 
-	/* clear list mutex */
-	pthread_mutex_destroy(&list_mutex);
-
 	/* clear process list */
-	list_for_each_safe(this_node, temp, &time_list.node) {
+	list_for_each_safe(this_node, temp, &proc_list.list) {
 		this_task = list_entry(this_node, struct mp2_task_struct, list);
 		list_del(this_node);
 		kfree(this_task);
