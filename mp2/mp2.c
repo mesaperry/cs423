@@ -9,14 +9,17 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
+#include <linux/kthread.h>
+#include <linux/jiffies.h>
 
 #include "mp2_given.h"
 
 #define FILENAME "status"
 #define DIRECTORY "mp2"
 #define RW_PERMISSION 0666                      // allows read, write but not execute
-#define BUFF_SIZE 256
+#define BUFF_SIZE 128
 #define DECIMAL_BASE 10
+#define LN2 693
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -35,17 +38,114 @@ struct mp2_task_struct {
     enum task_state { READY, RUNNING, SLEEPING } state;
 };
 
+static unsigned acrs; // admission control ratio sum
+
+static struct mp2_task_struct *running_task;
+static struct task_struct *dispatch_thread;
+
 static struct mutex list_mutex;
 static struct mp2_task_struct proc_list;
 
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
 
-/* get_proc_params - loads processes parameters into buffer */
+/* set_proc_state - sets target process to target state */
+static void set_proc_state(pid_t pid, enum task_state state) {
+	struct mp2_task_struct *this_task;
+
+	/* enter critical section */
+	mutex_lock(&list_mutex);
+
+	/* find process by PID and set state to READY */
+	list_for_each_entry(this_task, &proc_list.list, list) {
+		if (this_task->pid == pid) {
+			this_task->state = state;
+		}
+	}
+
+	/* exit critical section */
+	mutex_unlock(&list_mutex);
+}
+
+/* dispatch_func - callback for kernel thread responsible for context switch */
+static int dispatch_func(void *data) {
+	struct mp2_task_struct *task, *highest_task;
+	struct sched_param sparam;
+
+	/* prime kthread to sleep */
+	set_current_state(TASK_INTERRUPTIBLE);
+	
+	while (!kthread_should_stop()) {
+		/* sleep and wait to wake */
+		schedule();
+
+		/* kernel thread wakes up here */
+
+		/* enter critical section */
+		mutex_lock(&list_mutex);
+
+		/* search for READY task with highest priority */
+		highest_task = NULL;
+		list_for_each_entry(task, &proc_list.list, list) {
+			if ( task->state == READY &&
+				( highest_task == NULL ||
+				task->period < highest_task->period )
+				) {
+				highest_task = task;
+			}
+		}
+
+		/* context switch */
+
+		/* switch out of preempted task */
+		if (running_task != NULL) {
+			/* if current task was preempted, return to READY */
+			if (running_task->state == RUNNING) {
+				running_task->state = READY;
+			}
+
+			sparam.sched_priority = 0;
+			sched_setscheduler(running_task->linux_task, SCHED_NORMAL, &sparam);
+			running_task = NULL;
+		}
+
+		/* if a READY task exists and is, switch to it */
+		if (highest_task != NULL) {
+			highest_task->state = RUNNING;
+			wake_up_process(highest_task->linux_task);
+			sparam.sched_priority = 99;
+			sched_setscheduler(highest_task->linux_task, SCHED_FIFO, &sparam);
+			running_task = highest_task;
+		}
+
+		/* exit critical section */
+		mutex_unlock(&list_mutex);
+
+		/* prime kthread to sleep */
+		set_current_state(TASK_INTERRUPTIBLE);
+	}
+
+	/* idk some guide said to do this */
+	set_current_state(TASK_RUNNING);
+
+	return 0;
+}
+
+/* wakeup_timer_func - callback that READY's task and wakes dispatching thread */
+static void wakeup_timer_func(unsigned long pid) {
+	/* set process state to READY */
+	set_proc_state((pid_t) pid, READY);
+
+	/* wake dispatching thread */
+	wake_up_process(dispatch_thread);
+}
+
+/* get_proc_params - reads proc params into buff, returns bytes read */
 static int get_proc_params(char *buff, size_t count) {
 	struct mp2_task_struct *pcb;
 	loff_t pos;
 	int res;
+	int i;
 
 	/* initialize position to beginning of buffer */
 	pos = 0;
@@ -55,9 +155,9 @@ static int get_proc_params(char *buff, size_t count) {
 	mutex_lock(&list_mutex);
 
 	/* iterate through each process */
+	i = 0;
 	list_for_each_entry(pcb, &proc_list.list, list) {
-		printk(KERN_ALERT "HEY");
-
+		i++;
 		/* convert PID to string and insert into buffer */
 		res = snprintf(buff + pos, count - pos, "%d", pcb->pid);
 		if (res < 0) {
@@ -103,14 +203,15 @@ static int get_proc_params(char *buff, size_t count) {
 		buff[pos++] = '\n';
 	}
 
+	#ifdef DEBUG
+	printk(KERN_ALERT "number of elements in list: %d\n", i);
+	#endif
+
 	/* exit critical section */
 	mutex_unlock(&list_mutex);
 
 	/* null terminate string */
 	buff[pos++] = '\0';
-
-	printk(KERN_ALERT "%s\n", buff);
-	printk(KERN_ALERT "%Ld\n", pos);
 
 	return pos;
 }
@@ -120,6 +221,11 @@ static ssize_t mp2_read( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
    	char procfs_buffer[BUFF_SIZE];
    	int res;
+
+	/* should only read from pos 0, handle read termination */
+	if (*data > 0) {
+		return 0;
+	}
 	
 	/* generate output */
 	res = get_proc_params(procfs_buffer, count);
@@ -129,7 +235,7 @@ static ssize_t mp2_read( struct file *file, char __user *buffer,
 	}
 
 	/* copy buffer to user space */
-	return simple_read_from_buffer(buffer, count, data, procfs_buffer, BUFF_SIZE);
+	return simple_read_from_buffer(buffer, count, data, procfs_buffer, res);
 }
 
 /* get_next_arg - places next arg into buffer and returns size */
@@ -173,8 +279,85 @@ static struct mp2_task_struct* init_pcb( pid_t pid, unsigned long period,
 	aug_pcb->period = period;
 	aug_pcb->runtime_ms = processing_time;
 	aug_pcb->state = SLEEPING;
+	aug_pcb->deadline_jiff = 0;
+	setup_timer(&(aug_pcb->wakeup_timer), wakeup_timer_func, pid);
 
 	return aug_pcb;
+}
+
+/* dereg_task - de-registers task by PID */
+static void dereg_task(pid_t pid) {
+	struct mp2_task_struct *this_task;
+	struct list_head *this_node, *temp;
+
+    /* enter critical section */
+    mutex_lock(&list_mutex);
+
+    /* iterate through tasks */
+    list_for_each_safe(this_node, temp, &proc_list.list) {
+
+        /* get task */
+        this_task = list_entry(this_node, struct mp2_task_struct, list);
+
+        /* delete task with matching pid */
+        if (this_task->pid == pid) {
+			/* subtract this task from cumulative sum */
+			acrs += (1000 * this_task->runtime_ms) / this_task->period;
+
+			del_timer(&(this_task->wakeup_timer));
+            list_del(this_node);
+            kfree(this_task);
+        }
+        
+    }
+
+    /* exit critical section */
+    mutex_unlock(&list_mutex);
+}
+
+/* mp2_yield - put calling task to sleep and set wakeup timer */
+static void mp2_yield(pid_t pid) {
+	struct mp2_task_struct *this_task;
+
+	/* enter critical section */
+	mutex_lock(&list_mutex);
+
+	/* find process by PID */
+	list_for_each_entry(this_task, &proc_list.list, list) {
+		if (this_task->pid == pid) {
+
+			/* only set timer and put task to sleep if yield is on time */
+			if (	this_task->deadline_jiff == 0 ||
+			    	jiffies < this_task->deadline_jiff ) {
+
+				/* change state of calling task to SLEEPING */
+				this_task->state = SLEEPING;
+
+				/* set timer */
+				mod_timer(&(this_task->wakeup_timer), this_task->deadline_jiff - jiffies);
+
+				/* put task to sleep */
+				set_task_state(this_task->linux_task, TASK_UNINTERRUPTIBLE);
+			}
+
+			/* set deadline to now + period, if first yield */
+			if (this_task->deadline_jiff == 0) {
+				this_task->deadline_jiff = jiffies +
+										   msecs_to_jiffies(this_task->period);
+			}
+			/* set deadline to next deadline, if not first yield */
+			else {
+				this_task->deadline_jiff += msecs_to_jiffies(this_task->period);
+			}
+
+		}
+	}
+
+	/* exit critical section */
+	mutex_unlock(&list_mutex);
+
+	/* wake dispatching thread */
+	wake_up_process(dispatch_thread);
 }
 
 /* mp2_write - interface for userapps to register, yield, or de-register */
@@ -191,13 +374,19 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 	int error;
 	struct mp2_task_struct *pcb;
 
+	/* should only write to pos 0 */
+	if (*data > 0) {
+		return -EFAULT;
+	}
+
 	/* copy buffer into kernel space */
 	procfs_size = simple_write_to_buffer( procfs_buff,
-                                  BUFF_SIZE,
-                                  data,
-                                  buffer,
-                                  count );
+										  BUFF_SIZE,
+										  data,
+										  buffer,
+										  count );
 	if (procfs_size < 0) {
+		/* error handling */
 		return procfs_size;
 	}
 
@@ -235,13 +424,27 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 					pid, period, processing_time );
 			#endif
 
-			/* initialize augmented PCB */
-			pcb = init_pcb(pid, period, processing_time);
+			/* check admission control */
+			if (acrs + (1000 * processing_time) / period <= LN2) {
+				/* add this task to cumulative sum */
+				acrs += (1000 * processing_time) / period;
 
-			/* add PCB to list */
-			mutex_lock(&list_mutex);
-   			list_add(&(pcb->list), &(proc_list.list));
-			mutex_unlock(&list_mutex);
+				/* initialize augmented PCB */
+				pcb = init_pcb(pid, period, processing_time);
+
+				/* add PCB to list */
+				mutex_lock(&list_mutex);
+				list_add(&(pcb->list), &(proc_list.list));
+				mutex_unlock(&list_mutex);
+			}
+			else {
+				/* failed admission control */
+				#ifdef DEBUG
+				printk(KERN_ALERT "Failed admission control\n");
+				#endif
+				return -EINVAL;
+			}
+
 
 			break;
 
@@ -250,12 +453,18 @@ static ssize_t mp2_write( struct file *file, const char __user *buffer,
 			printk(KERN_ALERT "Yielding PID: %d\n", pid);
 			#endif
 
+			/* yield process */
+			mp2_yield(pid);
+
 			break;
 
 		case 'D':
 			#ifdef DEBUG
 			printk(KERN_ALERT "De-registering PID: %d\n", pid);
 			#endif
+
+            /* de-register task */
+            dereg_task(pid);
 
 			break;
 	}
@@ -276,11 +485,20 @@ static int __init mp2_init(void) {
 	printk(KERN_ALERT "MP2 MODULE LOADING\n");
 	#endif
 
+	/* init admission control ratio */
+	acrs = 0;
+
+    /* init curr process to none */
+    running_task = NULL;
+
 	/* init process list */
 	INIT_LIST_HEAD(&proc_list.list);
 
 	/* init list mutex */
 	mutex_init(&list_mutex);
+
+	/* init kernel/dispatching thread daemon */
+	dispatch_thread = kthread_run(dispatch_func, NULL, "dispatcher");
 
 	/* make directory */
 	procfs_dir = proc_mkdir(DIRECTORY, NULL);
@@ -320,6 +538,9 @@ static void __exit mp2_exit(void) {
 		list_del(this_node);
 		kfree(this_task);
 	}
+
+	/* stop kernel/dispatch thread */
+	kthread_stop(dispatch_thread);
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
