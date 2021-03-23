@@ -25,7 +25,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
 MODULE_DESCRIPTION("CS-423 MP2");
 
-#define DEBUG 1
+// #define DEBUG 1
 
 struct mp2_task_struct {
 	struct task_struct *linux_task;
