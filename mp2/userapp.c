@@ -18,6 +18,7 @@
 #define NS_PER_MS 1000000
 #define MS_PER_S 1000
 
+
 int read_file_content(char *buf, unsigned buf_size) {
     FILE *f;
     int i;
