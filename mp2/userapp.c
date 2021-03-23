@@ -7,7 +7,7 @@
 #include <time.h>
 #include <sys/types.h>
 
-#define PROC_TIME 20
+#define PROC_TIME_MS 94
 #define ITERATIONS 1500000
 #define FACTORIAL_TARGET 20
 
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
     pid = getpid();
 
     /* register self */
-    snprintf(buf, sizeof(buf), "R, %d, %s, %d\n", pid, argv[1], (int)PROC_TIME);
+    snprintf(buf, sizeof(buf), "R, %d, %s, %d\n", pid, argv[1], (int)PROC_TIME_MS);
     if (write_to_file(buf) != 0) {
         errno = EIO;
         perror("Couldn't write to file");
@@ -147,7 +147,7 @@ int main(int argc, char **argv) {
     }
     else {
         errno = -1;
-        perror("PID not found");
+        perror("PID not found, probably failed admission control");
         return EXIT_FAILURE;
     }
 

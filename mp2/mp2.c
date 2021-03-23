@@ -25,7 +25,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
 MODULE_DESCRIPTION("CS-423 MP2");
 
-#define DEBUG 0
+#define DEBUG 1
 
 struct mp2_task_struct {
 	struct task_struct *linux_task;
@@ -87,10 +87,8 @@ static int dispatch_func(void *data) {
 		/* search for READY task with highest priority */
 		highest_task = NULL;
 		list_for_each_entry(task, &proc_list.list, list) {
-			if ( task->state == READY &&
-				( highest_task == NULL ||
-				  task->period < highest_task->period )
-				) {
+			if ((task->state == READY || task->state == RUNNING) &&
+				(highest_task == NULL || task->period < highest_task->period)) {
 				highest_task = task;
 			}
 		}
@@ -204,7 +202,7 @@ static int get_proc_params(char *buff, size_t count) {
 	}
 
 	#ifdef DEBUG
-	printk(KERN_ALERT "number of elements in list: %d\n", i);
+	// printk(KERN_ALERT "number of elements in list: %d\n", i);
 	#endif
 
 	/* exit critical section */
