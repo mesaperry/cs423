@@ -25,7 +25,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
 MODULE_DESCRIPTION("CS-423 MP2");
 
-#define DEBUG 1
+#define DEBUG 0
 
 struct mp2_task_struct {
 	struct task_struct *linux_task;
@@ -103,7 +103,6 @@ static int dispatch_func(void *data) {
 			if (running_task->state == RUNNING) {
 				running_task->state = READY;
 			}
-			printk(KERN_ALERT "Task with PID: %d is now waiting\n", running_task->pid);
 
 			sparam.sched_priority = 0;
 			sched_setscheduler(running_task->linux_task, SCHED_NORMAL, &sparam);
@@ -112,7 +111,6 @@ static int dispatch_func(void *data) {
 
 		/* if a READY task exists and is, switch to it */
 		if (highest_task != NULL) {
-			printk(KERN_ALERT "Task with PID: %d is now running\n", highest_task->pid);
 			highest_task->state = RUNNING;
 			wake_up_process(highest_task->linux_task);
 			sparam.sched_priority = 99;
@@ -135,7 +133,6 @@ static int dispatch_func(void *data) {
 
 /* wakeup_timer_func - callback that READY's task and wakes dispatching thread */
 static void wakeup_timer_func(unsigned long pid) {
-	printk(KERN_ALERT "WAKEUP TIMER\n");
 	/* set process state to READY */
 	set_proc_state((pid_t) pid, READY);
 
@@ -333,32 +330,30 @@ static void mp2_yield(pid_t pid) {
 	/* find process by PID */
 	list_for_each_entry(this_task, &proc_list.list, list) {
 		if (this_task->pid == pid) {
-
-			/* set deadline to now + period, if first yield */
-			if (this_task->deadline_jiff == 0) {
-				this_task->deadline_jiff = jiffies +
-										   msecs_to_jiffies(this_task->period);
-			}
-			/* set deadline to next deadline, if not first yield */
-			else {
-				this_task->deadline_jiff += msecs_to_jiffies(this_task->period);
-			}
-
-			/* only set timer and put task to sleep if yield is on time */
-			if (jiffies < this_task->deadline_jiff) {
-				/* change state of calling task to SLEEPING */
-				this_task->state = SLEEPING;
-				printk(KERN_ALERT "Task with PID: %d is now SLEEPING\n", this_task->pid);
-
-				/* set timer */
-				mod_timer(&(this_task->wakeup_timer), this_task->deadline_jiff);
-				printk(KERN_ALERT "time rn: %lu, deadline time: %lu\n", jiffies, this_task->deadline_jiff);
-
-				/* put task to sleep */
-				set_task_state(this_task->linux_task, TASK_UNINTERRUPTIBLE);
-			}
-
+			break;
 		}
+	}
+
+	/* set deadline to now + period, if first yield */
+	if (this_task->deadline_jiff == 0) {
+		this_task->deadline_jiff = jiffies +
+									msecs_to_jiffies(this_task->period);
+	}
+	/* set deadline to next deadline, if not first yield */
+	else {
+		this_task->deadline_jiff += msecs_to_jiffies(this_task->period);
+	}
+
+	/* only set timer and put task to sleep if yield is on time */
+	if (jiffies < this_task->deadline_jiff) {
+		/* change state of calling task to SLEEPING */
+		this_task->state = SLEEPING;
+
+		/* set timer */
+		mod_timer(&(this_task->wakeup_timer), this_task->deadline_jiff);
+
+		/* put task to sleep */
+		set_task_state(this_task->linux_task, TASK_UNINTERRUPTIBLE);
 	}
 
 	/* exit critical section */
@@ -366,6 +361,8 @@ static void mp2_yield(pid_t pid) {
 
 	/* wake dispatching thread */
 	wake_up_process(dispatch_thread);
+
+	schedule();
 }
 
 /* mp2_write - interface for userapps to register, yield, or de-register */

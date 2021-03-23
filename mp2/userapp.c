@@ -8,7 +8,7 @@
 #include <sys/types.h>
 
 #define PROC_TIME 20
-#define ITERATIONS 100000
+#define ITERATIONS 1500000
 #define FACTORIAL_TARGET 20
 
 #define FILENAME "/proc/mp2/status"
