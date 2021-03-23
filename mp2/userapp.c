@@ -84,6 +84,7 @@ unsigned long get_time_diff(struct timespec *start, struct timespec *stop) {
     return diff_ms;
 }
 
+<<<<<<< HEAD
 unsigned long compute_factorial(unsigned its, unsigned target) {
     unsigned long num;
     int i, j;
@@ -92,6 +93,14 @@ unsigned long compute_factorial(unsigned its, unsigned target) {
         for (i = 1; i <= target; i++) {
             num *= i;
         }
+=======
+unsigned long compute_factorial(unsigned target) {
+    unsigned long num;
+    int i;
+
+    for (i = 1; i <= target; i++) {
+        num *= i;
+>>>>>>> 2e25f98f12b4f4a2568d4c3c612a0ed0d2d1d0f4
     }
 
     return num;
