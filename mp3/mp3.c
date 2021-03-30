@@ -4,6 +4,8 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
+#include <linux/sched.h>
+#include <linux/list.h>
 
 #define FILENAME "status"
 #define DIRECTORY "mp3"
@@ -15,6 +17,15 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
 
 #define DEBUG 1
+
+struct aug_task_struct {
+	struct task_struct *linux_task;
+    struct list_head list;
+    pid_t pid;
+    unsigned long proc_util;
+    unsigned long maj_fault_ct;
+    unsigned long min_fault_ct;
+};
 
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
