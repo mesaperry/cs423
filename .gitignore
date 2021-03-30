@@ -3,6 +3,8 @@
 *.ko
 *.o
 userapp
+monitor
+work
 
 # module files
 *.mod.c
