@@ -62,11 +62,17 @@ static size_t get_next_arg(char const *buff, char *arg_buff, loff_t pos_init) {
 
 /* helper function for proc_write */
 static void register_pid(pid_t pid) {
+	#ifdef DEBUG
+	printk(KERN_ALERT "Registering PID: %d\n", pid);
+	#endif
 	return;
 }
 
 /* helper function for proc_write */
 static void unregister_pid(pid_t pid) {
+	#ifdef DEBUG
+	printk(KERN_ALERT "Unregistering PID: %d\n", pid);
+	#endif
 	return;
 }
 
