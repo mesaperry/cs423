@@ -32,6 +32,9 @@ struct aug_task_struct {
     unsigned long min_fault_ct;
 };
 
+static struct workqueue_struct *wq;
+static struct mutex wq_mutex;
+
 static struct aug_task_struct pcb_list;
 static struct mutex list_mutex;
 
@@ -118,9 +121,12 @@ static void register_pid(pid_t pid) {
 	printk(KERN_ALERT "Registering PID: %d\n", pid);
 	#endif
 
+	/* create workqueue if list is empty */
+    mutex_lock(&wq_mutex);
 	if (list_empty(&pcb_list.list)) {
-		printk(KERN_ALERT "empty\n");
+		wq = create_workqueue("mp3_workqueue");
 	}
+    mutex_unlock(&wq_mutex);
 
 	/* create augmented PCB and add to list */
 	init_aug_pcb(pid);
@@ -134,15 +140,73 @@ static void unregister_pid(pid_t pid) {
 
 	del_aug_pcb(pid);
 
+	/* delete work queue */
+    mutex_lock(&wq_mutex);
 	if (list_empty(&pcb_list.list)) {
-		printk(KERN_ALERT "empty\n");
+		destroy_workqueue(wq);
 	}
+    mutex_unlock(&wq_mutex);
+}
+
+/* loads PIDS into the buffer */
+static int print_pids(char *buff, size_t count) {
+	struct aug_task_struct *pcb;
+	loff_t pos;
+	int res;
+
+	pos = 0;
+	res = 0;
+
+	/* enter critical section */
+	mutex_lock(&list_mutex);
+
+	/* iterate through each process */
+	list_for_each_entry(pcb, &pcb_list.list, list) {
+
+		/* convert PID to string and insert into buffer */
+		res = snprintf(buff + pos, count - pos, "%d", pcb->pid);
+		if (res < 0) {
+			/* return if error */
+			return res;
+		}
+
+		/* increment position by number of written characters */
+		pos += res;
+
+		/* insert newline */
+		buff[pos++] = '\n';
+
+	}
+
+	/* exit critical section */
+	mutex_unlock(&list_mutex);
+
+	/* null terminate string */
+	buff[pos++] = '\0';
+
+	return pos;
 }
 
 /* outputs a list of processes and their scheduling parameters */
 static ssize_t mp3_read( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
-    return 0;
+   	char procfs_buffer[BUFF_SIZE];
+   	int res;
+
+	/* should only read from pos 0, handle read termination */
+	if (*data > 0) {
+		return 0;
+	}
+	
+	/* generate output */
+	res = print_pids(procfs_buffer, count);
+	if (res < 0) {
+		/* error handling */
+		return res;
+	}
+
+	/* copy buffer to user space */
+	return simple_read_from_buffer(buffer, count, data, procfs_buffer, res);
 }
 
 /* interface for userapps to register, yield, or de-register */
@@ -204,8 +268,9 @@ static int __init mp3_init(void) {
 	printk(KERN_ALERT "mp3 MODULE LOADING\n");
 	#endif
 
-	/* init list mutex */
+	/* init mutex's */
 	mutex_init(&list_mutex);
+	mutex_init(&wq_mutex);
 
 	/* init augmented PCB list */
 	INIT_LIST_HEAD(&pcb_list.list);
