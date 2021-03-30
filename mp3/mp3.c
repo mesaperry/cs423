@@ -8,6 +8,9 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
+#include <linux/mutex.h>
+
+#include "mp3_given.h"
 
 #define FILENAME "status"
 #define DIRECTORY "mp3"
@@ -30,6 +33,7 @@ struct aug_task_struct {
 };
 
 static struct aug_task_struct pcb_list;
+static struct mutex list_mutex;
 
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
@@ -60,12 +64,66 @@ static size_t get_next_arg(char const *buff, char *arg_buff, loff_t pos_init) {
 	return arg_size;
 }
 
+/* creates an augmented PCB */
+static struct aug_task_struct * init_aug_pcb(pid_t pid) {
+	struct task_struct *pcb;
+	struct aug_task_struct *aug_pcb;
+
+	/* get the userapp's task_struct */
+	pcb = find_task_by_pid(pid);
+
+	/* allocate cache for PCB */
+	aug_pcb = (struct aug_task_struct*) kmalloc( sizeof(struct aug_task_struct),
+												 GFP_KERNEL );
+
+	/* populate PCB members */
+	aug_pcb->linux_task = pcb;
+	aug_pcb->pid = pid;
+
+	/* add PCB to list */
+	mutex_lock(&list_mutex);
+	list_add(&aug_pcb->list, &pcb_list.list);
+	mutex_unlock(&list_mutex);
+
+	return aug_pcb;
+}
+
+/* deletes an augmented PCB */
+static void del_aug_pcb(pid_t pid) {
+	struct aug_task_struct *this_pcb;
+	struct list_head *this_node, *temp;
+
+    /* enter critical section */
+    mutex_lock(&list_mutex);
+
+    /* iterate through PCBs */
+    list_for_each_safe(this_node, temp, &pcb_list.list) {
+        /* get PCB */
+        this_pcb = list_entry(this_node, struct aug_task_struct, list);
+
+        /* target PCB with matching pid */
+        if (this_pcb->pid == pid) {
+            list_del(this_node);
+            kfree(this_pcb);
+        }
+    }
+
+    /* exit critical section */
+    mutex_unlock(&list_mutex);
+}
+
 /* helper function for proc_write */
 static void register_pid(pid_t pid) {
 	#ifdef DEBUG
 	printk(KERN_ALERT "Registering PID: %d\n", pid);
 	#endif
-	return;
+
+	if (list_empty(&pcb_list.list)) {
+		printk(KERN_ALERT "empty\n");
+	}
+
+	/* create augmented PCB and add to list */
+	init_aug_pcb(pid);
 }
 
 /* helper function for proc_write */
@@ -73,7 +131,12 @@ static void unregister_pid(pid_t pid) {
 	#ifdef DEBUG
 	printk(KERN_ALERT "Unregistering PID: %d\n", pid);
 	#endif
-	return;
+
+	del_aug_pcb(pid);
+
+	if (list_empty(&pcb_list.list)) {
+		printk(KERN_ALERT "empty\n");
+	}
 }
 
 /* outputs a list of processes and their scheduling parameters */
@@ -140,6 +203,9 @@ static int __init mp3_init(void) {
 	#ifdef DEBUG
 	printk(KERN_ALERT "mp3 MODULE LOADING\n");
 	#endif
+
+	/* init list mutex */
+	mutex_init(&list_mutex);
 
 	/* init augmented PCB list */
 	INIT_LIST_HEAD(&pcb_list.list);
