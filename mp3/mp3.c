@@ -6,6 +6,8 @@
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
 #include <linux/list.h>
+#include <linux/slab.h>
+#include <linux/workqueue.h>
 
 #define FILENAME "status"
 #define DIRECTORY "mp3"
@@ -26,6 +28,8 @@ struct aug_task_struct {
     unsigned long maj_fault_ct;
     unsigned long min_fault_ct;
 };
+
+static struct aug_task_struct pcb_list;
 
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
@@ -131,6 +135,9 @@ static int __init mp3_init(void) {
 	printk(KERN_ALERT "mp3 MODULE LOADING\n");
 	#endif
 
+	/* init augmented PCB list */
+	INIT_LIST_HEAD(&pcb_list.list);
+
 	/* make directory */
 	procfs_dir = proc_mkdir(DIRECTORY, NULL);
 	if (!procfs_dir) {
@@ -152,6 +159,9 @@ static int __init mp3_init(void) {
 
 /* called when module is unloaded */
 static void __exit mp3_exit(void) {
+	struct aug_task_struct *this_pcb;
+	struct list_head *this_node, *temp;
+
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP3 MODULE UNLOADING\n");
 	#endif
@@ -159,6 +169,13 @@ static void __exit mp3_exit(void) {
 	/* remove proc files */
 	remove_proc_entry(FILENAME, procfs_dir);
 	remove_proc_entry(DIRECTORY, NULL);
+
+	/* clear augmented PCB list */
+	list_for_each_safe(this_node, temp, &pcb_list.list) {
+		this_pcb = list_entry(this_node, struct aug_task_struct, list);
+		list_del(this_node);
+		kfree(this_pcb);
+	}
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP3 MODULE UNLOADED\n");
