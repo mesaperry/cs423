@@ -21,6 +21,7 @@
 #define BUFF_SIZE 128
 #define DECIMAL_BASE 10
 #define MP3_BUFF_SIZE 2 << 19					// 512 KB
+#define SAMPLING_PERIOD_MS 50
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -36,8 +37,8 @@ struct aug_task_struct {
     unsigned long min_fault_ct;
 };
 
-static struct workqueue_struct *wq;
-static struct mutex wq_mutex;
+static struct work_struct work;
+static struct delayed_work dwork;
 
 static struct aug_task_struct pcb_list;
 static struct mutex list_mutex;
@@ -46,6 +47,13 @@ static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
 
 static unsigned long *mp3buf;
+
+/* work function handler */
+static void work_handler(struct work_struct *arg) {
+
+	/* repeat at constant rate */
+	schedule_delayed_work(&dwork, msecs_to_jiffies(SAMPLING_PERIOD_MS));
+}
 
 /* places next arg into buffer and returns size */
 static size_t get_next_arg(char const *buff, char *arg_buff, loff_t pos_init) {
@@ -74,7 +82,7 @@ static size_t get_next_arg(char const *buff, char *arg_buff, loff_t pos_init) {
 }
 
 /* creates an augmented PCB */
-static struct aug_task_struct * init_aug_pcb(pid_t pid) {
+static struct aug_task_struct* _init_aug_pcb(pid_t pid) {
 	struct task_struct *pcb;
 	struct aug_task_struct *aug_pcb;
 
@@ -90,20 +98,15 @@ static struct aug_task_struct * init_aug_pcb(pid_t pid) {
 	aug_pcb->pid = pid;
 
 	/* add PCB to list */
-	mutex_lock(&list_mutex);
 	list_add(&aug_pcb->list, &pcb_list.list);
-	mutex_unlock(&list_mutex);
 
 	return aug_pcb;
 }
 
 /* deletes an augmented PCB */
-static void del_aug_pcb(pid_t pid) {
+static void _del_aug_pcb(pid_t pid) {
 	struct aug_task_struct *this_pcb;
 	struct list_head *this_node, *temp;
-
-    /* enter critical section */
-    mutex_lock(&list_mutex);
 
     /* iterate through PCBs */
     list_for_each_safe(this_node, temp, &pcb_list.list) {
@@ -116,9 +119,6 @@ static void del_aug_pcb(pid_t pid) {
             kfree(this_pcb);
         }
     }
-
-    /* exit critical section */
-    mutex_unlock(&list_mutex);
 }
 
 /* helper function for proc_write */
@@ -127,15 +127,17 @@ static void register_pid(pid_t pid) {
 	printk(KERN_ALERT "Registering PID: %d\n", pid);
 	#endif
 
-	/* create workqueue if list is empty */
-    mutex_lock(&wq_mutex);
+    mutex_lock(&list_mutex);
+
+	/* create workqueue job if this is the first process */
 	if (list_empty(&pcb_list.list)) {
-		wq = create_workqueue("mp3_workqueue");
+		schedule_work(&work);
 	}
-    mutex_unlock(&wq_mutex);
 
 	/* create augmented PCB and add to list */
-	init_aug_pcb(pid);
+	_init_aug_pcb(pid);
+
+    mutex_unlock(&list_mutex);
 }
 
 /* helper function for proc_write */
@@ -144,14 +146,18 @@ static void unregister_pid(pid_t pid) {
 	printk(KERN_ALERT "Unregistering PID: %d\n", pid);
 	#endif
 
-	del_aug_pcb(pid);
+    mutex_lock(&list_mutex);
 
-	/* delete work queue */
-    mutex_lock(&wq_mutex);
+	/* delete augmented PCB from list and memory */
+	_del_aug_pcb(pid);
+
+	/* delete work queue if there's no more processes */
 	if (list_empty(&pcb_list.list)) {
-		destroy_workqueue(wq);
+		cancel_delayed_work(&dwork);
+		flush_scheduled_work();
 	}
-    mutex_unlock(&wq_mutex);
+
+    mutex_unlock(&list_mutex);
 }
 
 /* loads PIDS into the buffer */
@@ -278,10 +284,13 @@ static int __init mp3_init(void) {
 
 	/* init mutex's */
 	mutex_init(&list_mutex);
-	mutex_init(&wq_mutex);
 
 	/* init augmented PCB list */
 	INIT_LIST_HEAD(&pcb_list.list);
+
+	/* init work structs */
+	INIT_WORK(&work, work_handler);
+	INIT_DELAYED_WORK(&dwork, work_handler);
 
 	/* initialize shared memory buffer, set PG_reserved bit */
 	mp3buf = vmalloc(MP3_BUFF_SIZE);
