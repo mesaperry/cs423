@@ -21,7 +21,10 @@
 #define BUFF_SIZE 128
 #define DECIMAL_BASE 10
 #define MP3_BUFF_SIZE 2 << 19					// 512 KB
-#define SAMPLING_PERIOD_MS 50
+#define SAMPLING_RATE_HZ 20
+#define SAMPLING_PERIOD_MS 1000 / SAMPLING_RATE_HZ
+#define SAMPLE_LENGTH 4
+#define QUEUE_LENGTH 20 * 600
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -48,8 +51,35 @@ static struct proc_dir_entry *procfs_entry;
 
 static unsigned long *mp3buf;
 
+static unsigned long queue_ct;
+
 /* work function handler */
 static void work_handler(struct work_struct *arg) {
+	struct aug_task_struct *this_pcb;
+	struct list_head *this_node;
+	unsigned long min_flt, maj_flt, utime, stime, cpu_util;
+	int res;
+
+    /* iterate through PCBs */
+	mutex_lock(&list_mutex);
+    list_for_each(this_node, &pcb_list.list) {
+        /* get process values */
+        this_pcb = list_entry(this_node, struct aug_task_struct, list);
+		res = get_cpu_use(this_pcb->pid, &min_flt, &maj_flt, &utime, &stime);
+		if (res != 0) {
+			printk(KERN_ALERT "ERROR: Couldn't find process from PID\n");
+		}
+		cpu_util = (utime + stime) * 100 / msecs_to_jiffies(SAMPLING_PERIOD_MS);
+
+		mp3buf[queue_ct*SAMPLE_LENGTH] = jiffies;
+		mp3buf[queue_ct*SAMPLE_LENGTH+1] = min_flt;
+		mp3buf[queue_ct*SAMPLE_LENGTH+2] = maj_flt;
+		mp3buf[queue_ct*SAMPLE_LENGTH+3] = cpu_util;
+
+		/* increment to next sample in queue */
+		queue_ct = (queue_ct + 1) % QUEUE_LENGTH;
+    }
+	mutex_unlock(&list_mutex);
 
 	/* repeat at constant rate */
 	schedule_delayed_work(&dwork, msecs_to_jiffies(SAMPLING_PERIOD_MS));
@@ -297,6 +327,7 @@ static int __init mp3_init(void) {
 	for(i = 0; i < MP3_BUFF_SIZE; i += PAGE_SIZE) {
 		SetPageReserved(vmalloc_to_page((void *)((unsigned long)mp3buf + i)));
 	}
+	queue_ct = 0;
 
 	/* make directory */
 	procfs_dir = proc_mkdir(DIRECTORY, NULL);
