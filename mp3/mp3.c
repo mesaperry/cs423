@@ -9,6 +9,8 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
+#include <linux/mm.h>
+#include <linux/vmalloc.h>
 
 #include "mp3_given.h"
 
@@ -17,6 +19,7 @@
 #define RW_PERMISSION 0666                      // allows read, write but not execute
 #define BUFF_SIZE 128
 #define DECIMAL_BASE 10
+#define MP3_BUFF_SIZE 2 << 19					// 512 KB
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -40,6 +43,8 @@ static struct mutex list_mutex;
 
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
+
+static unsigned long *mp3buf;
 
 /* places next arg into buffer and returns size */
 static size_t get_next_arg(char const *buff, char *arg_buff, loff_t pos_init) {
@@ -264,6 +269,8 @@ static const struct file_operations mp3_fops = {
 
 /* called when module is loaded */
 static int __init mp3_init(void) {
+	int i;
+
 	#ifdef DEBUG
 	printk(KERN_ALERT "mp3 MODULE LOADING\n");
 	#endif
@@ -274,6 +281,12 @@ static int __init mp3_init(void) {
 
 	/* init augmented PCB list */
 	INIT_LIST_HEAD(&pcb_list.list);
+
+	/* initialize shared memory buffer, set PG_reserved bit */
+	mp3buf = vmalloc(MP3_BUFF_SIZE);
+	for(i = 0; i < MP3_BUFF_SIZE; i += PAGE_SIZE) {
+		SetPageReserved(vmalloc_to_page((void *)((unsigned long)mp3buf + i)));
+	}
 
 	/* make directory */
 	procfs_dir = proc_mkdir(DIRECTORY, NULL);
@@ -313,6 +326,9 @@ static void __exit mp3_exit(void) {
 		list_del(this_node);
 		kfree(this_pcb);
 	}
+
+	/* free shared memory buffer */
+	vfree(mp3buf);
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP3 MODULE UNLOADED\n");
