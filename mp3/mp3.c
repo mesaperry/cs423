@@ -11,6 +11,7 @@
 #include <linux/mutex.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
+#include <linux/page-flags.h>
 
 #include "mp3_given.h"
 
@@ -311,6 +312,7 @@ static int __init mp3_init(void) {
 static void __exit mp3_exit(void) {
 	struct aug_task_struct *this_pcb;
 	struct list_head *this_node, *temp;
+	int i;
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP3 MODULE UNLOADING\n");
@@ -327,7 +329,10 @@ static void __exit mp3_exit(void) {
 		kfree(this_pcb);
 	}
 
-	/* free shared memory buffer */
+	/* unlock pages in shared memory buffer and free */
+	for(i = 0; i < MP3_BUFF_SIZE; i += PAGE_SIZE) {
+		ClearPageReserved(vmalloc_to_page((void *)((unsigned long)mp3buf + i)));
+	}
 	vfree(mp3buf);
 
 	#ifdef DEBUG
