@@ -23,12 +23,12 @@
 #define RW_PERMISSION 0666                      // allows read, write but not execute
 #define BUFF_SIZE 128
 #define DECIMAL_BASE 10
-#define MP3_BUFF_SIZE 2 << 19					// 512 KB
+#define MP3_BUFF_SIZE (2 << 19)					// 512 KB
 #define SAMPLING_RATE_HZ 20
-#define SAMPLING_PERIOD_MS 1000 / SAMPLING_RATE_HZ
+#define SAMPLING_PERIOD_MS (1000 / SAMPLING_RATE_HZ)
 #define SAMPLE_LENGTH 4
-#define QUEUE_LENGTH 20 * 600
-#define NUM_BUFF_PAGES MP3_BUFF_SIZE / PAGE_SIZE
+#define QUEUE_LENGTH (20 * 600)
+#define NUM_BUFF_PAGES (MP3_BUFF_SIZE / PAGE_SIZE)
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -85,6 +85,7 @@ static void work_handler(struct work_struct *arg) {
 
 		/* increment to next sample in queue */
 		queue_ct = (queue_ct + 1) % QUEUE_LENGTH;
+		
     }
 	mutex_unlock(&list_mutex);
 
@@ -168,6 +169,7 @@ static void register_pid(pid_t pid) {
 
 	/* create workqueue job if this is the first process */
 	if (list_empty(&pcb_list.list)) {
+		queue_ct = 0;
 		schedule_work(&work);
 	}
 
@@ -323,10 +325,13 @@ static int cdev_mmap(struct file *file, struct vm_area_struct *vma) {
 	unsigned long pfn;
 	int res;
 	unsigned long i;
+	unsigned long req_num_pages;
+
+	req_num_pages = (vma->vm_end - vma->vm_start) / PAGE_SIZE;
 
 	/* remap page by page */
-	for(i = 0; i < NUM_BUFF_PAGES; i += 1) {
-		pfn = vmalloc_to_pfn((unsigned char *)mp3buf + i * PAGE_SIZE);
+	for(i = 0; i < req_num_pages; i += 1) {
+		pfn = vmalloc_to_pfn(((unsigned char *)mp3buf) + i * PAGE_SIZE);
 		res = remap_pfn_range( vma,
 							   vma->vm_start + i * PAGE_SIZE,
 							   pfn,
@@ -368,7 +373,6 @@ static int __init mp3_init(void) {
 	for(i = 0; i < MP3_BUFF_SIZE; i += PAGE_SIZE) {
 		SetPageReserved(vmalloc_to_page((void *)((unsigned long)mp3buf + i)));
 	}
-	queue_ct = 0;
 
     /* init and add character device to kernel */
     res = alloc_chrdev_region(&device_num, 0, CDEV_COUNT, CDEV_NAME);
