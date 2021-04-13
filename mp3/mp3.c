@@ -28,6 +28,7 @@
 #define SAMPLING_PERIOD_MS 1000 / SAMPLING_RATE_HZ
 #define SAMPLE_LENGTH 4
 #define QUEUE_LENGTH 20 * 600
+#define NUM_BUFF_PAGES MP3_BUFF_SIZE / PAGE_SIZE
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("mesagp2");
@@ -318,7 +319,20 @@ static int cdev_release(struct inode *inode, struct file *file) {
     return 0;
 }
 
-static int cdev_mmap(struct file *file, struct vm_area_struct *vm_area) {
+static int cdev_mmap(struct file *file, struct vm_area_struct *vma) {
+	unsigned long pfn;
+	int res;
+	unsigned long i;
+
+	/* remap page by page */
+	for(i = 0; i < NUM_BUFF_PAGES; i += 1) {
+		pfn = vmalloc_to_pfn((unsigned char *)mp3buf + i * PAGE_SIZE);
+		res = remap_pfn_range( vma,
+							   vma->vm_start + i * PAGE_SIZE,
+							   pfn,
+							   PAGE_SIZE,
+							   PAGE_SHARED );
+	}
     return 0;
 }
 
@@ -332,7 +346,7 @@ static const struct file_operations cdev_fops = {
 
 /* called when module is loaded */
 static int __init mp3_init(void) {
-	int i;
+	unsigned long i;
     int res;
 
 	#ifdef DEBUG
@@ -388,7 +402,8 @@ static int __init mp3_init(void) {
 static void __exit mp3_exit(void) {
 	struct aug_task_struct *this_pcb;
 	struct list_head *this_node, *temp;
-	int i;
+	unsigned long i;
+	struct vm_area_struct;
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "MP3 MODULE UNLOADING\n");
