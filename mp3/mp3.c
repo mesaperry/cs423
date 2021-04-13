@@ -52,7 +52,8 @@ static struct mutex list_mutex;
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
 
-static struct cdev *mp3_cdev;
+static struct cdev mp3_cdev;
+static dev_t device_num;
 
 static unsigned long *mp3buf;
 
@@ -333,7 +334,6 @@ static const struct file_operations cdev_fops = {
 static int __init mp3_init(void) {
 	int i;
     int res;
-    dev_t device_num;
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "mp3 MODULE LOADING\n");
@@ -361,8 +361,8 @@ static int __init mp3_init(void) {
     if (res != 0) {
         return res;
     }
-    cdev_init(mp3_cdev, &cdev_fops);
-    res = cdev_add(mp3_cdev, device_num, CDEV_COUNT);
+    cdev_init(&mp3_cdev, &cdev_fops);
+    res = cdev_add(&mp3_cdev, device_num, CDEV_COUNT);
     if (res != 0) {
         return res;
     }
@@ -399,7 +399,8 @@ static void __exit mp3_exit(void) {
 	remove_proc_entry(PROC_DIRNAME, NULL);
 
     /* remove character device from kernel */
-    cdev_del(mp3_cdev);
+    cdev_del(&mp3_cdev);
+	unregister_chrdev_region(device_num, CDEV_COUNT);
 
 	/* clear augmented PCB list */
 	list_for_each_safe(this_node, temp, &pcb_list.list) {
