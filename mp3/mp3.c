@@ -12,11 +12,14 @@
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
 #include <linux/page-flags.h>
+#include <linux/cdev.h>
 
 #include "mp3_given.h"
 
-#define FILENAME "status"
-#define DIRECTORY "mp3"
+#define PROC_FILENAME "status"
+#define PROC_DIRNAME "mp3"
+#define CDEV_NAME "mp3"
+#define CDEV_COUNT 1
 #define RW_PERMISSION 0666                      // allows read, write but not execute
 #define BUFF_SIZE 128
 #define DECIMAL_BASE 10
@@ -48,6 +51,8 @@ static struct mutex list_mutex;
 
 static struct proc_dir_entry *procfs_dir;
 static struct proc_dir_entry *procfs_entry;
+
+static struct cdev *mp3_cdev;
 
 static unsigned long *mp3buf;
 
@@ -230,7 +235,7 @@ static int print_pids(char *buff, size_t count) {
 }
 
 /* outputs a list of processes and their scheduling parameters */
-static ssize_t mp3_read( struct file *file, char __user *buffer,
+static ssize_t procfs_read( struct file *file, char __user *buffer,
 									size_t count, loff_t *data ) {
    	char procfs_buffer[BUFF_SIZE];
    	int res;
@@ -252,7 +257,7 @@ static ssize_t mp3_read( struct file *file, char __user *buffer,
 }
 
 /* interface for userapps to register, yield, or de-register */
-static ssize_t mp3_write( struct file *file, const char __user *buffer,
+static ssize_t procfs_write( struct file *file, const char __user *buffer,
 									size_t count, loff_t *data ) {
 	char procfs_buff[BUFF_SIZE];
 	ssize_t procfs_size;
@@ -298,15 +303,37 @@ static ssize_t mp3_write( struct file *file, const char __user *buffer,
 }
 
 /* stores links read and write functions to file */
-static const struct file_operations mp3_fops = {
-	.owner   = THIS_MODULE,
-	.read    = mp3_read,
-	.write   = mp3_write,
+static const struct file_operations procfs_fops = {
+	.owner  	= THIS_MODULE,
+	.read   	= procfs_read,
+	.write  	= procfs_write
+};
+
+static int cdev_open(struct inode *inode, struct file *file) {
+    return 0;
+}
+
+static int cdev_release(struct inode *inode, struct file *file) {
+    return 0;
+}
+
+static int cdev_mmap(struct file *file, struct vm_area_struct *vm_area) {
+    return 0;
+}
+
+/* file operations for the character device driver */
+static const struct file_operations cdev_fops = {
+	.owner		= THIS_MODULE,
+	.open		= cdev_open,
+	.release    = cdev_release,
+    .mmap       = cdev_mmap
 };
 
 /* called when module is loaded */
 static int __init mp3_init(void) {
 	int i;
+    int res;
+    dev_t device_num;
 
 	#ifdef DEBUG
 	printk(KERN_ALERT "mp3 MODULE LOADING\n");
@@ -329,14 +356,23 @@ static int __init mp3_init(void) {
 	}
 	queue_ct = 0;
 
-	/* make directory */
-	procfs_dir = proc_mkdir(DIRECTORY, NULL);
+    /* init and add character device to kernel */
+    res = alloc_chrdev_region(&device_num, 0, CDEV_COUNT, CDEV_NAME);
+    if (res != 0) {
+        return res;
+    }
+    cdev_init(mp3_cdev, &cdev_fops);
+    res = cdev_add(mp3_cdev, device_num, CDEV_COUNT);
+    if (res != 0) {
+        return res;
+    }
+
+	/* make procfs entry */
+	procfs_dir = proc_mkdir(PROC_DIRNAME, NULL);
 	if (!procfs_dir) {
 		return -ENOMEM;
 	}
-
-	/* make entry */
-	procfs_entry = proc_create(FILENAME, RW_PERMISSION, procfs_dir, &mp3_fops);
+	procfs_entry = proc_create(PROC_FILENAME, RW_PERMISSION, procfs_dir, &procfs_fops);
 	if (!procfs_entry) {
 		return -ENOMEM;
 	}
@@ -359,8 +395,11 @@ static void __exit mp3_exit(void) {
 	#endif
 
 	/* remove proc files */
-	remove_proc_entry(FILENAME, procfs_dir);
-	remove_proc_entry(DIRECTORY, NULL);
+	remove_proc_entry(PROC_FILENAME, procfs_dir);
+	remove_proc_entry(PROC_DIRNAME, NULL);
+
+    /* remove character device from kernel */
+    cdev_del(mp3_cdev);
 
 	/* clear augmented PCB list */
 	list_for_each_safe(this_node, temp, &pcb_list.list) {
