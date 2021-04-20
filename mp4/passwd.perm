@@ -1,0 +1,49 @@
+setfattr -n security.mp4 -v target /usr/bin/passwd
+rm /etc/pam.d/common-password
+cp common-password /etc/pam.d
+setfattr -n security.mp4 -v dir /etc
+setfattr -n security.mp4 -v exec /etc/ld.so.cache
+setfattr -n security.mp4 -v exec /etc/nsswitch.conf
+setfattr -n security.mp4 -v exec /etc/passwd
+setfattr -n security.mp4 -v dir /etc/pam.d
+setfattr -n security.mp4 -v read-only /etc/pam.d/passwd
+setfattr -n security.mp4 -v read-only /etc/pam.d/common-password
+setfattr -n security.mp4 -v exec /etc/localtime
+setfattr -n security.mp4 -v read-only /etc/pam.d/other
+setfattr -n security.mp4 -v read-only /etc/pam.d/common-auth
+setfattr -n security.mp4 -v read-only /etc/pam.d/common-account
+setfattr -n security.mp4 -v read-only /etc/pam.d/common-session
+setfattr -n security.mp4 -v dir /etc/security
+setfattr -n security.mp4 -v read-only /etc/security/pwquality.conf
+setfattr -n security.mp4 -v read-only /etc/krb5.conf
+setfattr -n security.mp4 -v read-only /etc/login.defs
+setfattr -n security.mp4 -v exec /etc/shadow
+# setfattr -n security.mp4 -v write-only /etc/nshadow
+setfattr -n security.mp4 -v dir /var
+setfattr -n security.mp4 -v dir /var/lib
+setfattr -n security.mp4 -v dir /var/lib/sss
+setfattr -n security.mp4 -v dir /var/lib/sss/mc
+setfattr -n security.mp4 -v exec /var/lib/sss/mc/passwd
+setfattr -n security.mp4 -v dir /var/cache
+setfattr -n security.mp4 -v dir /var/cache/cracklib
+setfattr -n security.mp4 -v read-only /var/cache/cracklib/cracklib_dict.pwd
+setfattr -n security.mp4 -v read-only /var/cache/cracklib/cracklib_dict.pwi
+setfattr -n security.mp4 -v read-only /var/cache/cracklib/cracklib_dict.hwm
+setfattr -n security.mp4 -v dir /var/run
+setfattr -n security.mp4 -v exec /var/run/utmp
+setfattr -n security.mp4 -v write-only /etc/.pwd.lock
+setfattr -n security.mp4 -v read-only /etc/ldap.conf
+setfattr -n security.mp4 -v dir /dev
+setfattr -n security.mp4 -v read-only /dev/urandom
+setfattr -n security.mp4 -v dir /usr
+setfattr -n security.mp4 -v dir /usr/share
+setfattr -n security.mp4 -v dir /usr/share/locale
+setfattr -n security.mp4 -v exec /usr/share/locale/locale.alias
+
+
+
+# setfattr -n security.mp4 -v dir /proc
+# setfattr -n security.mp4 -v dir /proc/self
+# setfattr -n security.mp4 -v read-only /proc/filesystems
+# setfattr -n security.mp4 -v read-only /proc/mount
+# setfattr -n security.mp4 -v read-only /proc/self/loginuid
